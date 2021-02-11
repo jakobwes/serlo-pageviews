@@ -10,6 +10,9 @@ knitr::opts_chunk$set(echo = TRUE)
 library("tidyverse")
 library("magrittr")
 ```
+
+# Intro
+
 We have two datasets: the variance and mean-normalised data `normalised_data` and the non-normalised original data `non_normalised`. Reading both in:
 ```{r}
 #setwd("~/Desktop/Serlo/Aufrufe_Analyse")
@@ -35,14 +38,9 @@ non_normalised %<>% mutate(frontend = ifelse(timestamp >= as.Date("2021-01-28"),
 non_normalised %<>% mutate(homeschooling = ifelse(timestamp >= as.Date("2020-12-15"), TRUE, FALSE))
 non_normalised %<>% drop_na()
 
-fit <- lm(serlo ~ wikipedia + frontend + homeschooling, normalised_data)
-
-#glm(serlo ~ wikipedia + frontend + homeschooling, family=Gamma)
-summary(fit)
 ```
 
-Some plots: 
-
+Plots showing the joint variation of both page-visits (plotting the normalised values here):
 ```{r}
 normalised_data %>%
   ggplot(aes(timestamp)) +
@@ -61,7 +59,7 @@ non_normalised %>%
 
 ```
 
-Interesting is the strong linearity when homeschooling is there, but the higher variance otherwise, 
+Interesting is the rrelatively strong linearity when homeschooling is there, but the higher variance otherwise. It may be an effect of not enough datapoints or something more fundamental: 
 ```{r}
 non_normalised %>% 
   filter(homeschooling==TRUE) %>%
@@ -79,19 +77,18 @@ normalised_data %>%
   ggplot(aes(x=wikipedia, y=serlo)) +
   geom_point() +
   ggtitle("All datapoints")
-```
 
-The strong linearity when homeschooling is there may be an effect of not enough datapoints or something more fundamental: 
-```{r}
 non_normalised %>% group_by(homeschooling) %>% count(n=n())
 ```
 
-For other datapoints (when homeschooling is not active) I have more deviation in the middle/upper end of the graph --> it seems like the error-variance is depending on the value. Also if homeschooling is true then there is still a deviation from linearity for small Wikipedia and small Serlo-values (ping @kulla: what would be possible interpretation of this stronger linearity and varying variance?)
+Given `homeschooling=TRUE`, it seems like we have a nearly linear trend, with still some deviations for big and small values. For the other datapoints there it more deviation in the middle/upper end of the graph --> it seems like the error-variance is depending on the predictor-values.
+
+# Linear models
 
 Looking at these plots we see that fitting a linear model is probably problematic, since probably the normality-assumption for the residuals does not hold. This is true: 
 
 ```{r}
-fit <-lm(serlo ~ wikipedia + homeschooling + frontend, normalised_data)
+fit <- lm(serlo ~ wikipedia + homeschooling + frontend, normalised_data)
 summary(fit)
 plot(fit)
 ```
@@ -177,13 +174,32 @@ plot(hs_true$wikipedia, hs_true$serlo)
 lines(hs_true$wikipedia, predict(fit_hs_true))
 ```
 
-We only need to take car of really small and really big values, otherwise this seems a solid predictor.
+We still have considerable deviations from normality, otherwise this seems a solid predictor --> useful for prediction, but not necessarily for interpretation since.
+
+# GAM
+
+Overall we see that a linear model is not really appropriate and also the glm has a very high deviance. I now try a non-parametric-method with a gam, meaning I fit a model:
+$$\mathbb E[S~|~\mathbf x] \equiv \alpha + \sum_{j = 1}^p f_j(x_j),$$
+with our predictors $\mathbf x$ and splines or linear inputs. Having homeschooling as additive input and using a spline for wikipedia I get:
+
+```{r}
+library(gam)
+normalised_gam <- gam(serlo ~ s(wikipedia) + homeschooling + frontend, data = normalised_data)
+
+plot(normalised_gam, se = TRUE)
+
+summary(normalised_gam)
+```
+
+This seems to fit really well.  We see from the ANOVA for nonparametric effects, that there is slight evidence for rejecting $H_0$ that the Wikipedia-contribution is linear $f_W$, what we also saw above and making these approaches slightly problematic. We also see that frontend has no significant effect, whilst homeschooling and Wikipedia have a big one (with still Wikipedia dominating everything and homeschooling providing a slight adjustment on the level). One interpretation for this effect is that teachers are more likely to recommend Serlo in homeschooling that Wikipedia, shifting everything slightly
+
+--> This model is really interesting and could give us a lot of info. I think we can now iterate on that and add predictors/expand.
 
 ------------
 
 Other notes: 
 
-- Homeschooling absorbes quite a lot of the frontend effects so far in the flawed linear model
+- Homeschooling absorbes quite a lot of the frontend effects so far in the flawed linear model and in the gam
 - Under the condition of homeschooling we seems to have a linear trend (exception big and small values) --> why is that? Can we work with that? 
 - Including a homeschooling-wikipedia-interaction is really interesting:
 
@@ -200,5 +216,9 @@ cat("AIC with interaction: ", AIC(lm(serlo ~ wikipedia*homeschooling + frontend,
 
 Is it useful to integrate the interaction? What would be an interpretation and isn't it faulty? It seems a bit like data dredging to find some significant interaction, but maybe there is a real interpretation (is there, since homeschooling only has two levels this amounts to $\alpha W + \beta I_{hs} W + \gamma I_{hs}$, meaning that homeschooling does not only change the level (like a new mean-term, but also the influence of wikipedia --> maybe this is right: teachers get pupils onto serlo) .
 
-- We could experiment with different glms
-- The influence of frontend is not a step-function, but rises linearly or exponentially over time. Model like $S_t = \alpha W_t + \beta e^t I_{f} + \dots$  
+- We could experiment with different glms --> Poisson-regression
+- The influence of frontend is not a step-function, but rises linearly or exponentially over time. Model like $S_t = \alpha W_t + \beta e^t I_{f} + \dots$. --> exponential weighting problematic, but sigmoid-weighting, or relu?
+
+
+
+
