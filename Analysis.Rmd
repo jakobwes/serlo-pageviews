@@ -1,0 +1,204 @@
+---
+title: "Pageview-Analysis"
+output: html_document
+---
+
+Goal: test if the frontend had a significant impact on pageviews. Idea: use Wikipedia-pageviews on school-materials to predict Serlo-ones (and account therefore for some temporal differences) and introduce frontend as additional predictor whose influence and significance we want to calculate/test.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("tidyverse")
+library("magrittr")
+```
+We have two datasets: the variance and mean-normalised data `normalised_data` and the non-normalised original data `non_normalised`. Reading both in:
+```{r}
+#setwd("~/Desktop/Serlo/Aufrufe_Analyse")
+normalised_data <- read.csv("pageviews.csv", colClasses=c("Date",NA, NA))
+normalised_data <- as_tibble(normalised_data)
+
+non_normalised <- read.csv("pageviews-not-normalized.csv",colClasses=c("Date",NA, NA))
+non_normalised <- as_tibble(non_normalised)
+
+head(normalised_data)
+head(non_normalised)
+
+```
+
+I introduce two new variables: the full-deployment of the frontend, starting from the 28.01.21 and the beginning of Germany-wide homeschooling on the 15.12.2020: 
+
+```{r}
+normalised_data %<>% mutate(frontend = ifelse(timestamp >= as.Date("2021-01-28"), TRUE, FALSE))
+normalised_data %<>% mutate(homeschooling = ifelse(timestamp >= as.Date("2020-12-15"), TRUE, FALSE))
+normalised_data %<>% drop_na()
+
+non_normalised %<>% mutate(frontend = ifelse(timestamp >= as.Date("2021-01-28"), TRUE, FALSE))
+non_normalised %<>% mutate(homeschooling = ifelse(timestamp >= as.Date("2020-12-15"), TRUE, FALSE))
+non_normalised %<>% drop_na()
+
+fit <- lm(serlo ~ wikipedia + frontend + homeschooling, normalised_data)
+
+#glm(serlo ~ wikipedia + frontend + homeschooling, family=Gamma)
+summary(fit)
+```
+
+Some plots: 
+
+```{r}
+normalised_data %>%
+  ggplot(aes(timestamp)) +
+  geom_line(aes(y=serlo, col="red")) +
+  geom_line(aes(y=wikipedia, col="blue")) +
+  ggtitle("Serlo (red) vs Wikipedia-Calls (blue)")
+
+```
+
+I want to use the Wikipedia-Calls to predict the Serlo-ones. Plots of all data-points split up by homeschooling:
+
+```{r}
+non_normalised %>% 
+  ggplot(aes(x=wikipedia, y=serlo, col=homeschooling)) +
+  geom_point()
+
+```
+
+Interesting is the strong linearity when homeschooling is there, but the higher variance otherwise, 
+```{r}
+non_normalised %>% 
+  filter(homeschooling==TRUE) %>%
+  ggplot(aes(x=wikipedia, y=serlo)) +
+  geom_point() + 
+  ggtitle("Linear prediction when homeschooling is active")
+
+non_normalised %>% 
+  filter(homeschooling==FALSE) %>%
+  ggplot(aes(x=wikipedia, y=serlo)) +
+  geom_point() +
+  ggtitle("Linear prediction without homeschooling")
+
+normalised_data %>%
+  ggplot(aes(x=wikipedia, y=serlo)) +
+  geom_point() +
+  ggtitle("All datapoints")
+```
+
+The strong linearity when homeschooling is there may be an effect of not enough datapoints or something more fundamental: 
+```{r}
+non_normalised %>% group_by(homeschooling) %>% count(n=n())
+```
+
+For other datapoints (when homeschooling is not active) I have more deviation in the middle/upper end of the graph --> it seems like the error-variance is depending on the value. Also if homeschooling is true then there is still a deviation from linearity for small Wikipedia and small Serlo-values (ping @kulla: what would be possible interpretation of this stronger linearity and varying variance?)
+
+Looking at these plots we see that fitting a linear model is probably problematic, since probably the normality-assumption for the residuals does not hold. This is true: 
+
+```{r}
+fit <-lm(serlo ~ wikipedia + homeschooling + frontend, normalised_data)
+summary(fit)
+plot(fit)
+```
+
+And a formal ks-test on normality of the residuals lets us to strongly reject their normality:
+
+```{r}
+ks.test(resid(fit), "pnorm")
+
+```
+
+Here I introduced `homeschooling` as additional predictor, since it seems to slightly change aboves relationship between Serlo and Wikipedia-pageviews. 
+
+We need to think of another model.  Given `homeschooling=FALSE` it seems like the error-variance in a linear-model we fit, depends on the pageviews of our Wikipedia-random-variable $W$. I can try a multiplicative model: 
+
+$$ S \sim W\epsilon \implies log(S) \sim log(W) + log(\epsilon) \text{ with } \epsilon \sim N(1, \sigma^2)$$
+
+Trying a log-transformation on both-sides, but still with Gaussian Errors I get: 
+
+```{r}
+fit_log_trafo <- lm(log(serlo) ~ log(wikipedia) + homeschooling, non_normalised)
+summary(fit_log_trafo)
+plot(fit_log_trafo)
+```
+
+And without homeschooling-predictor:
+```{r}
+fit_log_trafo_wout_homeschooling <- lm(log(serlo) ~ log(wikipedia), non_normalised)
+summary(fit_log_trafo_wout_homeschooling)
+plot(fit_log_trafo_wout_homeschooling)
+```
+
+This already seems better (quite good even),  without it being it. Now I can try a the above model with log-normal-errors. 
+
+A bit googling around I found this [thread]()
+https://stats.stackexchange.com/questions/47840/linear-model-with-log-transformed-response-vs-generalized-linear-model-with-log) and the associated Paper. It seems to be in general better to fit a glm then with Gaussian family and log as link, than a linear model with lognormal-error. Doing that gives (first only looking at the non-homeschooling-value): 
+
+```{r}
+hs_false <- non_normalised %>% filter(homeschooling==FALSE)
+
+glm_log_Gaussian_hs_false <- glm(serlo ~ wikipedia , family=gaussian(link="log"), hs_false)
+summary(glm_log_Gaussian_hs_false)
+```
+
+A small plot: 
+
+```{r}
+wikipedia_vals <- seq(min(hs_false$wikipedia), max(hs_false$wikipedia), 1)
+y_vals <- predict(glm_log_Gaussian_hs_false, list(wikipedia = wikipedia_vals), type="response")
+
+plot(hs_false$wikipedia, hs_false$serlo)
+lines(wikipedia_vals, y_vals)
+```
+
+I need to read into sanity-checks for glms, but it seems quite okay at first glance. This could be a model we could expand on. Now dropping the `homeschooling=FALSE`-condition and including as additional predictor in this glm
+
+```{r}
+glm_log_Gaussian <- glm(serlo ~ wikipedia +homeschooling , family=gaussian(link="log"), non_normalised)
+summary(glm_log_Gaussian)
+
+
+```
+This is also okay, but doesn't add much. We could now try to expand on this model or use the empirical finding of a stronger linear relationship between Serlo and Wikipedia, given `homeschooling=TRUE`, so fit a piecewise-model:
+
+\[S = \begin{cases} 
+      \alpha W + \beta + \epsilon & homeschooling = TRUE \\
+      \gamma W\epsilon & homeschooling = FALSE
+      \end{cases}
+\]
+
+The influence on homeschooling on the values is something we need to research on more. Just for illustration: linear model given `homeschooling=TRUE`:
+```{r}
+hs_true <- non_normalised %>% filter(homeschooling==TRUE)
+fit_hs_true <- lm(serlo ~ wikipedia, hs_true)
+summary(fit_hs_true)
+plot(fit_hs_true)
+
+```
+
+And values vs the line:
+```{r}
+plot(hs_true$wikipedia, hs_true$serlo)
+lines(hs_true$wikipedia, predict(fit_hs_true))
+```
+
+We only need to take car of really small and really big values, otherwise this seems a solid predictor.
+
+------------
+
+Other notes: 
+
+- Homeschooling absorbes quite a lot of the frontend effects so far in the flawed linear model
+- Under the condition of homeschooling we seems to have a linear trend (exception big and small values) --> why is that? Can we work with that? 
+- Including a homeschooling-wikipedia-interaction is really interesting:
+
+```{r}
+summary(lm(serlo ~ wikipedia*homeschooling + frontend, normalised_data))
+```
+
+The interaction is quite strong and significant. Of course the $R^2$ is higher (more predictors), but also the AIC is way lower: 
+
+```{r}
+cat("AIC without interaction: ", AIC(fit))
+cat("AIC with interaction: ", AIC(lm(serlo ~ wikipedia*homeschooling + frontend, normalised_data)))
+```
+
+Is it useful to integrate the interaction? What would be an interpretation and isn't it faulty? It seems a bit like data dredging to find some significant interaction, but maybe there is a real interpretation (is there, since homeschooling only has two levels this amounts to $\alpha W + \beta I_{hs} W + \gamma I_{hs}$, meaning that homeschooling does not only change the level (like a new mean-term, but also the influence of wikipedia --> maybe this is right: teachers get pupils onto serlo) .
+
+- We could experiment with different glms
+- The influence of frontend is not a step-function, but rises linearly or exponentially over time. Model like $S_t = \alpha W_t + \beta e^t I_{f} + \dots$  
