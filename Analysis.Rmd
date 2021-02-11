@@ -179,8 +179,9 @@ We still have considerable deviations from normality, otherwise this seems a sol
 # GAM
 
 Overall we see that a linear model is not really appropriate and also the glm has a very high deviance. I now try a non-parametric-method with a gam, meaning I fit a model:
+
 $$\mathbb E[S~|~\mathbf x] \equiv \alpha + \sum_{j = 1}^p f_j(x_j),$$
-with our predictors $\mathbf x$ and splines or linear inputs. Having homeschooling as additive input and using a spline for wikipedia I get:
+with our predictors $\mathbf x$ as splines or linear inputs. Having homeschooling as additive input and using a spline for wikipedia I get:
 
 ```{r}
 library(gam)
