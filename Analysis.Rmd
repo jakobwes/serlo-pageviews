@@ -200,9 +200,10 @@ This seems to fit really well.  We see from the ANOVA for nonparametric effects,
 
 Now we can compare the models. We have already seen above that the GAM-model does best when it comes to interpretation, since the assumptions of the linear models are slightly flawed and the GLM has really high deviance. But what about predictive power?
 
-I do a 100 splits in training and test-data and and calculate the mean l1-error over those. I get:
+I do a 100 splits in training and test-data and and calculate the mean l1-error over those. For benchmarking-purposes I also include fitting a randomForest, which I did not include above, due to the difficult interpretability of it. I get:
 
 ```{r}
+library(randomForest)
 n <- nrow(non_normalised)
 train_size <- round(2/3 * n)
 folds <- 100
@@ -211,6 +212,7 @@ gam_error <- numeric(folds)
 glm_error <- numeric(folds)
 log_trafo_error <- numeric(folds)
 linear_error <- numeric(folds)
+rndforest_error <- numeric(folds)
 
 for(i in 1:folds){
   if(i%%10 == 0) cat("Calculating fold ", i, "\n")
@@ -229,15 +231,19 @@ for(i in 1:folds){
   
   linear_model <- lm(serlo ~ wikipedia + homeschooling + frontend, data = train_set)
   linear_error[i] <- mean(abs(predict(linear_model, test_set) - test_set$serlo))
+  
+  rndforest_model <- randomForest(serlo ~ wikipedia + homeschooling + frontend, data = train_set)
+  rndforest_error[i] <- mean(abs(predict(rndforest_model, test_set) - test_set$serlo))
+
 }
 
-mean_errors <- data.frame(names=c("GAM", "GLM", "Linear with log-trafo", "Linear model"), mean_error_value=c(mean(gam_error), mean(glm_error), mean(log_trafo_error), mean(linear_error)))
+mean_errors <- data.frame(names=c("GAM", "GLM", "Linear with log-trafo", "Linear model", "Random Forest"), mean_error_value=c(mean(gam_error), mean(glm_error), mean(log_trafo_error), mean(linear_error), mean(rndforest_error)))
 
 print("Comparing the models on 100 folds of the training data and l1-error we get the following order:")
 print(mean_errors[order(mean_errors$mean_error_value),])
 ```
 
-So we see that the GAM-model achieves also the best performance (in all tests that I ran), besides being the one with the highest interpretability, quickly followed by the linear model, which seems to be a good predictor and approximation to the GAM, but whose assumptions are flawed as we saw above, and far before the GLM and linear model with log-trafo. More data will show, if this is also the case in future.
+So we see that the GAM-model achieves also the best performance (in all tests that I ran and even higher than the randomForest which is astonishing), besides being the one with the highest interpretability, quickly followed by the linear model, which seems to be a good predictor and approximation to the GAM, but whose assumptions are flawed as we saw above, and far before the GLM and linear model with log-trafo. More data will show, if this is also the case in future.
 
 
 
