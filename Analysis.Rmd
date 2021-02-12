@@ -196,6 +196,51 @@ This seems to fit really well.  We see from the ANOVA for nonparametric effects,
 
 --> This model is really interesting and could give us a lot of info. I think we can now iterate on that and add predictors/expand.
 
+# Model Comparison
+
+Now we can compare the models. We have already seen above that the GAM-model does best when it comes to interpretation, since the assumptions of the linear models are slightly flawed and the GLM has really high deviance. But what about predictive power?
+
+I do a 100 splits in training and test-data and and calculate the mean l1-error over those. I get:
+
+```{r}
+n <- nrow(non_normalised)
+train_size <- round(2/3 * n)
+folds <- 100
+
+gam_error <- numeric(folds)
+glm_error <- numeric(folds)
+log_trafo_error <- numeric(folds)
+linear_error <- numeric(folds)
+
+for(i in 1:folds){
+  if(i%%10 == 0) cat("Calculating fold ", i, "\n")
+  train_points <- sample(n, train_size)
+  train_set <- non_normalised[train_points, ]
+  test_set <- non_normalised[-train_points, ]
+  
+  gam_model <- gam(serlo ~ s(wikipedia) + homeschooling + frontend, data = train_set)
+  gam_error[i] <- mean(abs(predict(gam_model, test_set) - test_set$serlo))
+  
+  glm_log_Gaussian_model <- glm(serlo ~ wikipedia +homeschooling , family=gaussian(link="log"), data = train_set)
+  glm_error[i] <- mean(abs(predict(glm_log_Gaussian_model, test_set) - test_set$serlo))
+  
+  log_trafo_model <- lm(log(serlo) ~ log(wikipedia) + homeschooling, data = train_set)
+  log_trafo_error[i] <- mean(abs(predict(log_trafo_model, test_set) - test_set$serlo))
+  
+  linear_model <- lm(serlo ~ wikipedia + homeschooling + frontend, data = train_set)
+  linear_error[i] <- mean(abs(predict(linear_model, test_set) - test_set$serlo))
+}
+
+mean_errors <- data.frame(names=c("GAM", "GLM", "Linear with log-trafo", "Linear model"), mean_error_value=c(mean(gam_error), mean(glm_error), mean(log_trafo_error), mean(linear_error)))
+
+print("Comparing the models on 100 folds of the training data and l1-error we get the following order:")
+print(mean_errors[order(mean_errors$mean_error_value),])
+```
+
+So we see that the GAM-model achieves also the best performance (in all tests that I ran), besides being the one with the highest interpretability, quickly followed by the linear model, which seems to be a good predictor and approximation to the GAM, but whose assumptions are flawed as we saw above, and far before the GLM and linear model with log-trafo. More data will show, if this is also the case in future.
+
+
+
 ------------
 
 Other notes: 
@@ -219,7 +264,5 @@ Is it useful to integrate the interaction? What would be an interpretation and i
 
 - We could experiment with different glms --> Poisson-regression
 - The influence of frontend is not a step-function, but rises linearly or exponentially over time. Model like $S_t = \alpha W_t + \beta e^t I_{f} + \dots$. --> exponential weighting problematic, but sigmoid-weighting, or relu?
-
-
 
 
