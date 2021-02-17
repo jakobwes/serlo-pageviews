@@ -16,11 +16,19 @@ library("magrittr")
 We have two datasets: the variance and mean-normalised data `normalised_data` and the non-normalised original data `non_normalised`. Reading both in:
 ```{r}
 #setwd("~/Desktop/Serlo/Aufrufe_Analyse")
-normalised_data <- read.csv("pageviews.csv", colClasses=c("Date",NA, NA))
-normalised_data <- as_tibble(normalised_data)
 
-non_normalised <- read.csv("pageviews-not-normalized.csv",colClasses=c("Date",NA, NA))
+#non_normalised <- read.csv("pageviews-not-normalized.csv",colClasses=c("Date",NA, NA))
+non_normalised  <- read.csv("data/pageviews_170221.csv", colClasses=c("Date",NA, NA))
 non_normalised <- as_tibble(non_normalised)
+
+normalised_data <- non_normalised
+
+normalised_data$serlo <- (normalised_data$serlo - mean(normalised_data$serlo))/sd(normalised_data$serlo)
+normalised_data$wikipedia <- (normalised_data$wikipedia - mean(normalised_data$wikipedia))/sd(normalised_data$wikipedia)
+
+#normalised_data <- read.csv("pageviews.csv", colClasses=c("Date",NA, NA))
+#normalised_data <- as_tibble(normalised_data)
+
 
 head(normalised_data)
 head(non_normalised)
@@ -31,11 +39,12 @@ I introduce two new variables: the full-deployment of the frontend, starting fro
 
 ```{r}
 normalised_data %<>% mutate(frontend = ifelse(timestamp >= as.Date("2021-01-28"), TRUE, FALSE))
-normalised_data %<>% mutate(homeschooling = ifelse(timestamp >= as.Date("2020-12-15"), TRUE, FALSE))
+normalised_data %<>% mutate(homeschooling = ifelse(timestamp >= as.Date("2021-01-11") | timestamp %in% seq(as.Date("2020-12-15"), by = "day", length.out = 4), TRUE, FALSE))
 normalised_data %<>% drop_na()
 
 non_normalised %<>% mutate(frontend = ifelse(timestamp >= as.Date("2021-01-28"), TRUE, FALSE))
-non_normalised %<>% mutate(homeschooling = ifelse(timestamp >= as.Date("2020-12-15"), TRUE, FALSE))
+non_normalised %<>% mutate(homeschooling = ifelse(timestamp >= as.Date("2021-01-11") | timestamp %in% seq(as.Date("2020-12-15"), by = "day", length.out = 4), TRUE, FALSE))
+
 non_normalised %<>% drop_na()
 
 ```
@@ -44,9 +53,11 @@ Plots showing the joint variation of both page-visits (plotting the normalised v
 ```{r}
 normalised_data %>%
   ggplot(aes(timestamp)) +
-  geom_line(aes(y=serlo, col="red")) +
-  geom_line(aes(y=wikipedia, col="blue")) +
-  ggtitle("Serlo (red) vs Wikipedia-Calls (blue)")
+  geom_line(aes(y=serlo, col="serlo")) +
+  geom_line(aes(y=wikipedia, col="wikipedia")) +
+  ggtitle("Serlo vs Wikipedia-Calls")
+
+#ggsave("plots/serlo_vs_wikipedia_over_time.png")
 
 ```
 
@@ -59,7 +70,7 @@ non_normalised %>%
 
 ```
 
-Interesting is the rrelatively strong linearity when homeschooling is there, but the higher variance otherwise. It may be an effect of not enough datapoints or something more fundamental: 
+Interesting is the relatively strong linearity when homeschooling is there, but the higher variance otherwise. It may be an effect of not enough datapoints or something more fundamental (possible explanation could be the especially big values during homeschooling + less datapoints for the middle): 
 ```{r}
 non_normalised %>% 
   filter(homeschooling==TRUE) %>%
